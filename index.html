@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OPE Slack連携</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f5f5f5;
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .container {
+      width: 100%;
+      max-width: 600px;
+      padding: 1rem;
+      text-align: center;
+    }
+    h1 {
+      margin-bottom: 1rem;
+    }
+    .hidden {
+      display: none;
+    }
+    button, select {
+      display: block;
+      width: 80%;
+      margin: 0.5rem auto;
+      padding: 1rem;
+      font-size: 1rem;
+      background-color: #0077cc;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #005fa3;
+    }
+    select {
+      background-color: white;
+      color: black;
+      border: 1px solid #ccc;
+    }
+    .back-btn {
+      background-color: #888;
+    }
+    .back-btn:hover {
+      background-color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- ページ1: 患者選択 -->
+    <div id="page1">
+      <h1>患者選択</h1>
+      <select id="patientSelect"></select>
+      <button onclick="goToPage('page2')">次へ</button>
+      <button onclick="showProgress()">手術室進行状況</button>
+    </div>
+
+    <!-- ページ2: 手術室選択 -->
+    <div id="page2" class="hidden">
+      <h1>手術室選択</h1>
+      <button onclick="goToPage('page3','OPE1')">OPE1</button>
+      <button onclick="goToPage('page3','OPE2')">OPE2</button>
+      <button onclick="goToPage('page3','OPE3')">OPE3</button>
+      <button class="back-btn" onclick="goToPage('page1')">戻る</button>
+    </div>
+
+    <!-- ページ3: 項目選択 -->
+    <div id="page3" class="hidden">
+      <h1>項目選択</h1>
+      <button onclick="goToPage('page4','予定時間延長')">予定時間延長</button>
+      <button onclick="goToPage('page4','迎えまで15分')">迎えまで15分</button>
+      <button onclick="goToPage('page4','IC場所')">IC場所</button>
+      <button class="back-btn" onclick="goToPage('page2')">戻る</button>
+    </div>
+
+    <!-- ページ4: 詳細選択 -->
+    <div id="page4" class="hidden">
+      <h1>詳細選択</h1>
+      <div id="detailButtons"></div>
+      <button class="back-btn" onclick="goToPage('page3')">戻る</button>
+    </div>
+
+    <!-- 手術室進行状況 -->
+    <div id="progressPage" class="hidden">
+      <h1>手術室進行状況</h1>
+      <div id="historyWrapper">読み込み中...</div>
+      <button class="back-btn" onclick="reset()">戻る</button>
+    </div>
+  </div>
+
+  <script>
+    const GAS_BASE_URL = "https://script.google.com/macros/s/AKfycbxmdjuX6MJf6VkMl4t9Y_O3S_f2paGLE5XObIDJXq-iH8uqn5OoQUcVqBt4oHCrljjX/exec";
+
+    let state = { patientName: '', patientCategory: '', ope: '', category: '', detail: '' };
+
+    // ページ切替
+    function goToPage(page, value = '') {
+      if (page === 'page2') {
+        const select = document.getElementById('patientSelect');
+        const [name, category] = select.value.split('|');
+        state.patientName = name;
+        state.patientCategory = category;
+      } else if (page === 'page3') {
+        state.ope = value;
+      } else if (page === 'page4') {
+        state.category = value;
+        renderDetails(value);
+      } else if (page === 'send') {
+        state.detail = value;
+        sendMessage();
+        return;
+      }
+
+      document.querySelectorAll('.container > div').forEach(div => div.classList.add('hidden'));
+      document.getElementById(page).classList.remove('hidden');
+    }
+
+    // 詳細選択ボタンを表示
+    function renderDetails(category) {
+      const options = {
+        '予定時間延長': ['1時間以内','1時間以上','時間不明'],
+        '迎えまで15分': ['徒歩','車いす','ベッド'],
+        'IC場所': ['OPE カンファ室','病棟']
+      };
+      const container = document.getElementById('detailButtons');
+      container.innerHTML = '';
+      (options[category] || []).forEach(option => {
+        const btn = document.createElement('button');
+        btn.innerText = option;
+        btn.onclick = () => goToPage('send', option);
+        container.appendChild(btn);
+      });
+    }
+
+    // 患者リスト取得
+    async function fetchPatients() {
+      try {
+        const res = await fetch(`${GAS_BASE_URL}?endpoint=patients`);
+        const data = await res.json();
+        const select = document.getElementById('patientSelect');
+        select.innerHTML = '';
+        if (data.ok && data.data.length) {
+          data.data.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = `${p.name}|${p.category}`;
+            opt.textContent = `${p.name} (${p.category})`;
+            select.appendChild(opt);
+          });
+        } else {
+          const opt = document.createElement('option');
+          opt.textContent = '患者データなし';
+          select.appendChild(opt);
+        }
+      } catch (err) {
+        console.error("患者リスト取得エラー:", err);
+      }
+    }
+
+    // データ送信
+    async function sendMessage() {
+      const res = await fetch(GAS_BASE_URL, {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state)
+      });
+      const data = await res.json();
+      alert(data.ok ? "送信成功！" : "エラー: " + data.error);
+      reset();
+    }
+
+    // 進行状況表示
+    async function showProgress() {
+      document.querySelectorAll('.container > div').forEach(d => d.classList.add('hidden'));
+      document.getElementById("progressPage").classList.remove("hidden");
+      const res = await fetch(`${GAS_BASE_URL}?endpoint=history`);
+      const data = await res.json();
+      const el = document.getElementById("historyWrapper");
+      if (data.ok && data.latest) {
+        el.innerHTML = ['OPE1','OPE2','OPE3'].map(ope =>
+          `<div><strong>${ope}</strong><br>${data.latest[ope] || '履歴なし'}</div>`).join("");
+      } else {
+        el.innerHTML = "取得失敗";
+      }
+    }
+
+    // 最初に患者リストを読み込み
+    function reset() {
+      state = { patientName: '', patientCategory: '', ope: '', category: '', detail: '' };
+      goToPage('page1');
+      fetchPatients();
+    }
+
+    // 初期化 & 自動更新
+    window.onload = () => {
+      reset();
+      setInterval(fetchPatients, 60000); // 1分ごとに自動更新
+    };
+  </script>
+</body>
+</html>
